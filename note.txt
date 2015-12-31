@@ -1,0 +1,181 @@
+//========		Before you start ======== //
+
+Twitter call back url shouldn't be null
+Register new App
+Twitter -> apps.twiitter 
+Github  -> settings > Applications
+Facebook -> facebookDevoper > My App > create new App
+
+
+1. 		rails new omniAuthFromStuk
+
+2.		rails g model User provider:string uid:string name:string 
+		rake db:migrate
+
+3. 		gem 'omniauth-facebook'
+		gem 'omniauth-twitter'
+		gem 'omniauth-github'
+
+		bundle install
+
+
+4.		create new initailizers called omniauth.rb
+		config > initalizers > omniauth.rb
+		** this is place where we put key id and key secret
+
+		Rails.application.config.middleware.use OmniAuth::Buider do
+			provider :twitter, 'Api key' , 'Api secret'
+			provider :facebook, 'App id', 'App secret'
+			provider :github, 'client id', 'client secret'
+		end
+
+
+5.		rails g controller home index profile
+
+6.		change route.rb to root 'home/index'
+
+7.		rails g controller sessions 
+
+8.		inside sessions_controller.rb
+		// ref for facebook :https://github.com/mkdynamic/omniauth-facebook
+		def create
+			auth = request.env["omniauth.auth"] 
+			//this is response u got when u do call back and store inside environment variable
+			//auth is array object
+
+			session[:omniauth] = auth.except('extra')
+			//  extract info and u don't need and put extracted object array inside new object
+
+			user = User.sign_in_from_omniauth(auth)
+			sign_in_from_omniauth is method created by u inside model
+			** find user record inside our server using thirdParty auth info and if there is no record
+			insert the new record with info getting from thridParty
+
+			session[:user_id] = user.id
+			redirect_to root_url, notice "Signed in successfully"
+		end
+
+
+		def destroy
+			session[:user_id] = nil
+			session[:omniauth] = nil
+			redirect_to root_url , notice "Signed out"
+		end
+
+
+9.		inside user.rb
+		
+		def self.sign_in_from_omniauth(auth)
+			find_by(provider: auth['provider'],uid: auth['uid']) || create_user_from_omniauth(auth)
+		end
+
+		def self.create_user_from_omniauth(auth)
+			create(
+				provider: auth['provider'],
+				uid: auth['uid'],
+				name: auth['info']['name']
+
+			)
+
+10.     inside route.rb
+			get 'auth/:provider/callback', to: "sessions#create"
+				** to use omnipath, redirect users to auth/:provider where :provider is social network.
+				From there omnipath will take over and authenticate user.
+				Once the user is authenticated, omnipath will set special hash on the rack enviroment of request to 
+				/auth/:provider/callback
+				and redirect to our sessionscontroller create method to insert that user record inside our model
+
+			delete 'sign_out', to: "sessions#destroy" , as: 'sign_out'
+
+
+
+11.   	go to application controller
+		
+		private
+
+		def current_user
+			@current_user ||= User.find(session[:user_id]) if session[:user_id]
+		end
+
+		helper_method :current_user
+		// if u assign this inside helper_method , u can use it anywhere
+
+
+
+		//======== styling ========= //
+
+12.    inside , application.html.erb , above yield 
+		render 'layouts/header'
+
+		inside > _header.html.erb
+			<nav class="navbar navbar-default">
+			  <div class="container-fluid">
+			    <!-- Brand and toggle get grouped for better mobile display -->
+			    <div class="navbar-header">
+			      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
+			        <span class="sr-only">Toggle navigation</span>
+			        <span class="icon-bar"></span>
+			        <span class="icon-bar"></span>
+			        <span class="icon-bar"></span>
+			      </button>
+			      <%= link_to "Omni" , root_path , class: "navbar-brand" %>
+			    </div>
+
+			    <!-- Collect the nav links, forms, and other content for toggling -->
+			    <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+			    
+			      <ul class="nav navbar-nav navbar-right">
+			   
+			        <% if current_user %>
+			          <li>Sign in as :<%= current_user.name %> - <%= image_tag(@auth['info']['image'], width: '50', class: 'img-circle') %></li>
+			          <li><%= link_to "Sign Out" ,  sign_out_path , method: :delete %></li>
+			        <% else %>
+			          <li><%= link_to "auth/facebook" do %><%= image_tag('facebook.png', width: '40' ,class: 'img-circle')  %> <% end %></li>
+			          <li><%= link_to "auth/github" do  %><%= image_tag('github.png', width: '40' , class: 'img-circle' ) %>
+			            <% end %></li>
+			          <li><%= link_to "auth/twitter" do  %><%= image_tag('twitter.png', width: '40' , class: 'img-circle' ) %>
+			            <% end %></li>
+			        <% end %>
+			      </ul>
+			    </div><!-- /.navbar-collapse -->
+			  </div><!-- /.container-fluid -->
+			</nav>
+
+
+		insdie > home_controller.rb
+			class HomeController < ApplicationController
+				before_action :set_auth 
+				before_action :require_login , only: [:profile]
+				# make sure it is only authenticate profile page and not index page
+				#  if u authenticate all pages, it will cause loop hole error
+
+				  def index
+				  	if current_user
+						redirect_to home_profile_path
+					end
+				  end
+
+				  def profile
+				  end
+
+				  private
+				  def set_auth
+				  	@auth = session[:omniauth] if session[:omniauth]
+				  end
+
+
+				  # Returns true if the user is logged in, false otherwise.
+				  def authenticate_user?
+				     !current_user.nil?
+				  end
+
+				  def require_login
+				    unless authenticate_user?
+				      flash[:error] = "You must be logged in to access this section"
+				      redirect_to root_path # halts request cycle
+				    end
+				  end
+
+				end
+
+
